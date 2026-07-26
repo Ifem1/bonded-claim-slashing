@@ -149,6 +149,7 @@ gltest tests/integration/ -v -s --network studionet
 - Deployed on StudioNet at `0xD8311C18d0116D394515DF301A89340aa5192410`.
 - Explorer: https://explorer-studio.genlayer.com/contracts/0xD8311C18d0116D394515DF301A89340aa5192410
 - Studio import: network `studionet`, contract address `0xD8311C18d0116D394515DF301A89340aa5192410`
+- GitHub: https://github.com/Ifem1/bonded-claim-slashing
 
 ## Measured on live consensus
 

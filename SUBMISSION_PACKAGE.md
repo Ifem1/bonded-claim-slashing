@@ -14,7 +14,7 @@ The notes paragraph is 966 characters, counted programmatically with Python `len
 
 ## Evidence Links
 
-- GitHub repo: (to be created — see Git Hygiene below)
+- GitHub repo: https://github.com/Ifem1/bonded-claim-slashing
 - Explorer contract page: https://explorer-studio.genlayer.com/contracts/0xD8311C18d0116D394515DF301A89340aa5192410
 - Studio import: network `studionet`, contract address `0xD8311C18d0116D394515DF301A89340aa5192410`
 
@@ -41,4 +41,4 @@ An earlier deploy at `0xe91E76dF3d62430Eae9263C0F3c430F8522A8109` also exercised
 
 ## Git Hygiene
 
-This folder is not yet its own git repository. Before submission, initialize it (`git init`), commit with meaningful messages, push to a public GitHub repo, and update the Evidence Links section above with the real URL. No AI/agent co-author trailers.
+This folder is its own git repository, pushed to the public GitHub repo linked above. Single clean commit, no AI/agent co-author trailers (verified with `git log -1 --format='%B' | grep -i "co-authored\|claude\|generated with"`, which returns nothing).
