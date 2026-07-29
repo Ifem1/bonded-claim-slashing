@@ -15,7 +15,7 @@ The notes paragraph is 694 characters, counted programmatically with PowerShell 
 ## Evidence Links
 
 - GitHub repo: https://github.com/Ifem1/bonded-claim-slashing
-- Explorer contract page: https://explorer-studio.genlayer.com/contracts/0x777b112C2C6c3636bab296E3e60690822F71FdD2
+- Explorer contract page: https://explorer-studio.genlayer.com/address/0x777b112C2C6c3636bab296E3e60690822F71FdD2
 - Studio import: network `studionet`, contract address `0x777b112C2C6c3636bab296E3e60690822F71FdD2`
 
 ## Source Files
@@ -35,7 +35,7 @@ The notes paragraph is 694 characters, counted programmatically with PowerShell 
 - `submit_claim`: `0x9705ad4cdeef3c1cab2a715e7d80bac56066483bd485a141fda36edb000adde5`
 - `resolve_claim`: `0x5845d34f9a184b85f4a68afb4a86e420480efde407b00ae74239b02cf8dd2a65`
 - `withdraw`: `0x9502e5d497c6f53df0f67e3ed4d02b59f636aa573e0ddd88b4dbf0f2881c48cd`
-- Superseded deploys: `0xe91E76dF3d62430Eae9263C0F3c430F8522A8109`, `0xD8311C18d0116D394515DF301A89340aa5192410`
+- Superseded deploys are no longer submission addresses; use only the patched canonical address above.
 
 ## Local Verification
 

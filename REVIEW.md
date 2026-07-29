@@ -59,6 +59,10 @@ Patched StudioNet contract:
 
 `0x777b112C2C6c3636bab296E3e60690822F71FdD2`
 
+Explorer:
+
+https://explorer-studio.genlayer.com/address/0x777b112C2C6c3636bab296E3e60690822F71FdD2
+
 Live transaction evidence:
 
 - Deploy: `0x2b06b192c0df5b5e48ede08e7c66c87a38e48aadff323460ede87984109e07e4`

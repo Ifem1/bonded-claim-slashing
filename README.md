@@ -149,7 +149,7 @@ gltest tests/integration/ -v -s --network studionet
 - 29 direct tests pass (`tests/direct/`), including the retryable-`UNKNOWN` withdrawal/re-resolution regression requested in review.
 - StudioNet integration rerun on Jul 30, 2026 did not reach assertions because `gltest` failed while parsing a fresh deploy receipt with `consensus_data: None`; this is recorded as a harness/RPC failure, not a passing claim.
 - Patched resubmission deployed on StudioNet at `0x777b112C2C6c3636bab296E3e60690822F71FdD2`.
-- Explorer: https://explorer-studio.genlayer.com/contracts/0x777b112C2C6c3636bab296E3e60690822F71FdD2
+- Explorer: https://explorer-studio.genlayer.com/address/0x777b112C2C6c3636bab296E3e60690822F71FdD2
 - Studio import: network `studionet`, contract address `0x777b112C2C6c3636bab296E3e60690822F71FdD2`
 - GitHub: https://github.com/Ifem1/bonded-claim-slashing
 
