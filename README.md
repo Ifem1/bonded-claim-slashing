@@ -27,10 +27,10 @@ flowchart LR
     D --> E["gl.nondet.exec_prompt(prompt + evidence)"]
     E --> F["prompt_comparative consensus"]
     F --> G["Normalize SUPPORTED / REFUTED / UNKNOWN + confidence"]
-    G --> H["SUPPORTED/UNKNOWN: claimant withdraws\nREFUTED: beneficiary withdraws"]
+    G --> H["SUPPORTED: claimant withdraws\nREFUTED: beneficiary withdraws\nUNKNOWN: retry until cap, then claimant withdraws"]
 ```
 
-`submit_claim` is a payable write: it takes the bond as `gl.message.value`, validates the claim text and the `https://` evidence URL, and stores an immutable `PENDING` record. `resolve_claim` is permissionless — anyone can pay the gas to trigger resolution, so the claimant is never blocked waiting on the beneficiary (or vice versa) to move things forward. Resolution fetches the evidence URL and asks the model a single, narrow question inside one `prompt_comparative` round. `withdraw` then lets exactly the correct party pull the bond once the claim is terminal.
+`submit_claim` is a payable write: it takes the bond as `gl.message.value`, validates the claim text and the `https://` evidence URL, and stores an immutable `PENDING` record. `resolve_claim` is permissionless — anyone can pay the gas to trigger resolution, so the claimant is never blocked waiting on the beneficiary (or vice versa) to move things forward. Resolution fetches the evidence URL and asks the model a single, narrow question inside one `prompt_comparative` round. `withdraw` then lets exactly the correct party pull the bond once the claim is terminal. A retryable `UNKNOWN` is not terminal for withdrawal until `max_attempts` is exhausted.
 
 ### Non-determinism budget (2 operations, as designed)
 
@@ -65,17 +65,18 @@ Remove consensus and `resolve_claim` has nothing to run on — there's no determ
 
 - A fetch failure (non-2xx status, exception, or empty body) is encoded as `error_code: EXTERNAL` and always resolves to `UNKNOWN` — it is never read as "the claim is false." See `test_external_fetch_failure_becomes_unknown`.
 - Unparseable model output (no JSON object recoverable, or invalid JSON) is `error_code: LLM_ERROR`, also `UNKNOWN`. See `test_malformed_model_output_becomes_unknown`.
-- `UNKNOWN` is an explicit, first-class terminal-adjacent state, not a forced guess. A claim that resolves `UNKNOWN` can be retried by anyone up to `max_attempts`, after which it reverts rather than looping forever (`test_unknown_can_retry_until_attempt_cap`).
-- The safe failure direction here is toward the claimant: `UNKNOWN` routes the bond back to whoever posted it, exactly like `SUPPORTED`. A claimant is never slashed by an ambiguous or failed read — only a validator-confirmed `REFUTED` at `HIGH` confidence slashes the bond. This is a deliberate asymmetry: it costs the beneficiary nothing to wait for a clean disagreement, but it would cost the claimant real money to be slashed on a coin flip.
+- `UNKNOWN` is an explicit, first-class retry state, not a forced guess. A claim that resolves `UNKNOWN` can be retried by anyone up to `max_attempts`; before that cap, `withdrawable` returns `0` and `withdraw` reverts with `claim retryable`. At the cap, `UNKNOWN` becomes final and claimant-withdrawable.
+- The safe failure direction here is toward the claimant only after retries are exhausted: `UNKNOWN` eventually routes the bond back to whoever posted it, exactly like `SUPPORTED`, but not while the claim can still be resolved again. A claimant is never slashed by an ambiguous or failed read — only a validator-confirmed `REFUTED` at `HIGH` confidence slashes the bond. This is a deliberate asymmetry: it costs the beneficiary nothing to wait for a clean disagreement, but it would cost the claimant real money to be slashed on a coin flip.
 
 ## Safety properties (each backed by a named test)
 
 - **A below-minimum bond is rejected before any state exists.** `test_submit_claim_requires_minimum_bond`.
 - **Only `https://` evidence URLs are accepted.** `test_invalid_evidence_url_reverts`.
 - **Claim text and URLs are bounded and reverted, never silently truncated.** `test_overlong_claim_reverts_before_truncation`, `test_overlong_evidence_url_reverts_before_truncation`.
-- **A terminal claim cannot be resolved again.** Enforced in `resolve_claim` (`status == SUPPORTED or REFUTED` guard) and exercised on StudioNet in `test_full_lifecycle_supported_claim_refunds_claimant`'s replay-after-terminal assertion.
+- **A terminal or withdrawn claim cannot be resolved again.** Enforced in `resolve_claim` (`SUPPORTED`/`REFUTED`, attempt-capped `UNKNOWN`, and `withdrawn` guards), with direct regression coverage for Joaquin's review edge in `test_withdrawn_unknown_cannot_resolve_again`.
 - **A pending claim cannot be withdrawn.** `test_pending_claim_cannot_withdraw`.
-- **Only the correct party (claimant on `SUPPORTED`/`UNKNOWN`, beneficiary on `REFUTED`) can withdraw.** `test_wrong_party_cannot_withdraw_supported_claim`.
+- **Retryable `UNKNOWN` is not withdrawable.** `test_retryable_unknown_cannot_withdraw_before_attempt_cap`; final `UNKNOWN` after the cap is withdrawable in `test_unknown_becomes_withdrawable_after_attempt_cap`.
+- **Only the correct party (claimant on `SUPPORTED`/final `UNKNOWN`, beneficiary on `REFUTED`) can withdraw.** `test_wrong_party_cannot_withdraw_supported_claim`.
 - **State is marked withdrawn before value leaves, so a duplicate call can't double-spend.** `test_withdraw_marks_state_before_value_leaves`, `test_double_withdraw_reverts`.
 - **A claim-count cap and an attempt cap both exist and are enforced.** `test_claim_cap_is_enforced`, `test_unknown_can_retry_until_attempt_cap`.
 - **Reads on an unknown claim fail closed** (`UNKNOWN` status, `0` withdrawable, `exists: false`), never crash or default open. `test_unknown_claim_reads_fail_closed`.
@@ -88,7 +89,8 @@ There is no time-based rule in this contract (no cooldowns, deadlines, or expira
 
 - `SUPPORTED`: claimant withdraws the full bond.
 - `REFUTED`: beneficiary withdraws the full bond.
-- `UNKNOWN` (fetch failure, unparseable output, or sub-`HIGH` confidence, whether before a retry or after the attempt cap): claimant withdraws the full bond — same resting place as `SUPPORTED`, so ambiguity never strands funds or defaults to a slash.
+- Retryable `UNKNOWN` before `max_attempts`: nothing is withdrawable; the bond remains in the contract so anyone can retry resolution.
+- Final `UNKNOWN` at `max_attempts`: claimant withdraws the full bond — same resting place as `SUPPORTED`, so ambiguity never strands funds or defaults to a slash.
 - `PENDING`: nothing is withdrawable; the bond sits in the contract balance until someone calls `resolve_claim`, which is permissionless so neither party can be blocked from progressing it.
 
 ## Why it's reusable
@@ -144,27 +146,26 @@ gltest tests/integration/ -v -s --network studionet
 ## Status
 
 - `genvm-lint`: clean on both `contracts/bonded_claim_slashing.py` and `examples/bonded_claim_consumer.py`.
-- 26 direct tests pass (`tests/direct/`).
-- 9 StudioNet integration tests pass (`tests/integration/`), covering every write method, every view method, the `SUPPORTED` and `REFUTED` payout paths, replay-after-terminal rejection, and a strict convergence check.
-- Deployed on StudioNet at `0xD8311C18d0116D394515DF301A89340aa5192410`.
-- Explorer: https://explorer-studio.genlayer.com/contracts/0xD8311C18d0116D394515DF301A89340aa5192410
-- Studio import: network `studionet`, contract address `0xD8311C18d0116D394515DF301A89340aa5192410`
+- 29 direct tests pass (`tests/direct/`), including the retryable-`UNKNOWN` withdrawal/re-resolution regression requested in review.
+- StudioNet integration rerun on Jul 30, 2026 did not reach assertions because `gltest` failed while parsing a fresh deploy receipt with `consensus_data: None`; this is recorded as a harness/RPC failure, not a passing claim.
+- Patched resubmission deployed on StudioNet at `0x777b112C2C6c3636bab296E3e60690822F71FdD2`.
+- Explorer: https://explorer-studio.genlayer.com/contracts/0x777b112C2C6c3636bab296E3e60690822F71FdD2
+- Studio import: network `studionet`, contract address `0x777b112C2C6c3636bab296E3e60690822F71FdD2`
 - GitHub: https://github.com/Ifem1/bonded-claim-slashing
 
 ## Measured on live consensus
 
-`scripts/test_exercise_deployed.py` drove every write and view against the deployed address above in one recorded run:
+`scripts/redeploy-and-exercise.mjs` deployed the patched source and drove the live write surface against the deployed address above:
 
-- `submit_claim` with a 5000-wei bond, claim *"The webpage at the evidence URL contains a visible heading with the exact text 'Example Domain'."*, evidence URL `https://example.com` — accepted, `claim_id = bcs-1`.
-- `resolve_claim` converged on the first attempt: `status: SUPPORTED`, `confidence: HIGH`, `error_code: NONE`, `evidence_summary: "The provided HTML for https://example.com includes a visible <h1> heading with the exact text 'Example Domain'."`
-- `withdrawable` correctly reported `5000` for the claimant and `0` for the beneficiary before withdrawal.
-- `withdraw` executed (`tx_execution_failed: False`); the claim record updated to `withdrawn: true, bond: 0` in the same call.
-- The separate StudioNet convergence test (`test_resolve_convergence_on_identical_claim_and_evidence`) ran the identical claim and evidence URL through two independent consensus rounds, and both landed on the same `status` and `confidence` — not merely "no crash," the produced verdict category was identical.
+- Deploy tx: `0x2b06b192c0df5b5e48ede08e7c66c87a38e48aadff323460ede87984109e07e4`.
+- `submit_claim` tx: `0x9705ad4cdeef3c1cab2a715e7d80bac56066483bd485a141fda36edb000adde5`, with a 1-wei bond and evidence URL `https://example.com`.
+- `resolve_claim` tx: `0x5845d34f9a184b85f4a68afb4a86e420480efde407b00ae74239b02cf8dd2a65`; it resolved `SUPPORTED`, `HIGH`, with summary: `"The fetched HTML document contains the exact heading '<h1>Example Domain</h1>', which matches the claim."`
+- `withdraw` tx: `0x9502e5d497c6f53df0f67e3ed4d02b59f636aa573e0ddd88b4dbf0f2881c48cd`; direct transaction lookup shows it targeted `0x777b112C2C6c3636bab296E3e60690822F71FdD2` and emitted a 1-wei outbound message to the claimant.
 
 ## The honest limits
 
 - **`resolve_claim` can return `UNDETERMINED`/`NO_MAJORITY` on StudioNet** with nothing written; this is documented, expected consensus behavior, not a contract bug. `tests/integration/conftest.py::resolve_until_settled` retries the transaction itself when this happens — the contract's own `max_attempts` counter only increments on rounds that actually write a result.
-- **Studio simulates contract balances without a real EVM/ghost-contract layer.** In the recorded run above, `get_config().balance` still read `5000` (the full pre-withdrawal balance) several minutes after the `withdraw` transaction reported success and the claim record showed `withdrawn: true, bond: 0`. The internal accounting and the transfer-message emission are proven correct and tested; the actual balance debit from `emit_transfer` to an EOA is not something StudioNet's simulated balance visibly confirmed within this observation window. Anyone relying on `self.balance` as ground truth for real fund receipt should re-verify on a live non-Studio network before depending on it.
+- **StudioNet was under RPC pressure during resubmission.** The live deploy/submit/resolve/withdraw writes were accepted, but several follow-up CLI reads timed out, and the full `gltest` integration rerun failed at setup while parsing a deploy receipt whose `consensus_data` field was `None`.
 - **This primitive judges one evidence URL against one claim.** It does not corroborate across multiple sources and does not track claimant or beneficiary reputation over time — that is a deliberately different, separate primitive (multi-source corroboration), not something this contract also tries to be.
 - **A consumer-key collision overwrites `latest_claim_for`.** If two unrelated claims are filed under the same `consumer_key`, only the most recent `claim_id` is retrievable by key; the older claim still exists and is resolvable by ID via `get_claim`/`resolve_claim`/`withdraw`, it's just not the one `latest_claim_for` returns. Consumers tracking many concurrent claims should mint a unique key per claim rather than reusing one key per relationship.
 - **No time-based logic exists in this version** (no bond expiry, no claim-submission deadline). A consumer wanting "the claimant forfeits if not resolved within N days" would need to build that on top; this primitive resolves whenever anyone calls `resolve_claim`, with no deadline.

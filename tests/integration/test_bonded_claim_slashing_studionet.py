@@ -79,6 +79,34 @@ def test_withdraw_reverts_while_claim_pending(claims):
     assert tx_execution_failed(withdraw_receipt)
 
 
+def test_retryable_unknown_is_not_withdrawable_before_attempt_cap(claims):
+    accounts = create_accounts(1)
+    beneficiary = accounts[0].address
+    consumer_key = "studionet-retryable-unknown"
+
+    receipt = claims.submit_claim(
+        args=[
+            TRUE_CLAIM,
+            "https://nonexistent.invalid/claim-evidence",
+            beneficiary,
+            consumer_key,
+        ]
+    ).transact(value=2000)
+    assert not tx_execution_failed(receipt)
+
+    claim_id = claims.latest_claim_for(args=[consumer_key]).call()
+    resolve_receipt = resolve_until_settled(claims, claim_id)
+    assert not tx_execution_failed(resolve_receipt)
+
+    resolved = claims.get_claim(args=[claim_id]).call()
+    assert resolved["status"] == "UNKNOWN"
+    assert resolved["attempts"] == 1
+    assert claims.withdrawable(args=[claim_id, claims_default_recipient(claims)]).call() == 0
+
+    withdraw_receipt = claims.withdraw(args=[claim_id]).transact()
+    assert tx_execution_failed(withdraw_receipt)
+
+
 def test_full_lifecycle_supported_claim_refunds_claimant(claims):
     accounts = create_accounts(1)
     beneficiary = accounts[0].address

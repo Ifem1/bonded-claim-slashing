@@ -122,7 +122,7 @@ def test_low_confidence_supported_becomes_unknown(direct_vm, direct_deploy, dire
     contract.resolve_claim(claim_id)
 
     assert contract.claim_status(claim_id) == STATUS_UNKNOWN
-    assert contract.withdrawable(claim_id, as_hex_address(direct_owner)) == 10
+    assert contract.withdrawable(claim_id, as_hex_address(direct_owner)) == 0
 
 
 def test_malformed_model_output_becomes_unknown(direct_vm, direct_deploy, direct_bob):
@@ -163,6 +163,34 @@ def test_unknown_can_retry_until_attempt_cap(direct_vm, direct_deploy, direct_bo
         contract.resolve_claim(claim_id)
 
 
+def test_retryable_unknown_cannot_withdraw_before_attempt_cap(
+    direct_vm, direct_deploy, direct_bob, direct_owner
+):
+    direct_vm.mock_web(r"example\.com", {"status": 500, "body": "down"})
+    contract = deploy_claims(direct_deploy, max_attempts=2)
+    claim_id = submit_claim(direct_vm, contract, direct_bob, value=10)
+    contract.resolve_claim(claim_id)
+
+    assert contract.get_claim(claim_id)["status"] == STATUS_UNKNOWN
+    assert contract.get_claim(claim_id)["attempts"] == 1
+    assert contract.withdrawable(claim_id, as_hex_address(direct_owner)) == 0
+    with direct_vm.expect_revert("claim retryable"):
+        contract.withdraw(claim_id)
+
+
+def test_unknown_becomes_withdrawable_after_attempt_cap(
+    direct_vm, direct_deploy, direct_bob, direct_owner
+):
+    direct_vm.mock_web(r"example\.com", {"status": 500, "body": "down"})
+    contract = deploy_claims(direct_deploy, max_attempts=1)
+    claim_id = submit_claim(direct_vm, contract, direct_bob, value=10)
+    contract.resolve_claim(claim_id)
+
+    assert contract.get_claim(claim_id)["status"] == STATUS_UNKNOWN
+    assert contract.get_claim(claim_id)["attempts"] == 1
+    assert contract.withdrawable(claim_id, as_hex_address(direct_owner)) == 10
+
+
 def test_pending_claim_cannot_withdraw(direct_vm, direct_deploy, direct_bob):
     contract = deploy_claims(direct_deploy)
     claim_id = submit_claim(direct_vm, contract, direct_bob, value=10)
@@ -188,7 +216,7 @@ def test_wrong_party_cannot_withdraw_supported_claim(direct_vm, direct_deploy, d
 
 def test_withdraw_marks_state_before_value_leaves(direct_vm, direct_deploy, direct_bob, direct_owner):
     direct_vm.mock_web(r"example\.com", {"status": 500, "body": "down"})
-    contract = deploy_claims(direct_deploy)
+    contract = deploy_claims(direct_deploy, max_attempts=1)
     claim_id = submit_claim(direct_vm, contract, direct_bob, value=10)
     contract.resolve_claim(claim_id)
 
@@ -202,13 +230,24 @@ def test_withdraw_marks_state_before_value_leaves(direct_vm, direct_deploy, dire
 
 def test_double_withdraw_reverts(direct_vm, direct_deploy, direct_bob):
     direct_vm.mock_web(r"example\.com", {"status": 500, "body": "down"})
-    contract = deploy_claims(direct_deploy)
+    contract = deploy_claims(direct_deploy, max_attempts=1)
     claim_id = submit_claim(direct_vm, contract, direct_bob, value=10)
     contract.resolve_claim(claim_id)
     contract.withdraw(claim_id)
 
     with direct_vm.expect_revert("already withdrawn"):
         contract.withdraw(claim_id)
+
+
+def test_withdrawn_unknown_cannot_resolve_again(direct_vm, direct_deploy, direct_bob):
+    direct_vm.mock_web(r"example\.com", {"status": 500, "body": "down"})
+    contract = deploy_claims(direct_deploy, max_attempts=1)
+    claim_id = submit_claim(direct_vm, contract, direct_bob, value=10)
+    contract.resolve_claim(claim_id)
+    contract.withdraw(claim_id)
+
+    with direct_vm.expect_revert("claim already withdrawn"):
+        contract.resolve_claim(claim_id)
 
 
 def test_resolve_unknown_claim_reverts(direct_vm, direct_deploy):

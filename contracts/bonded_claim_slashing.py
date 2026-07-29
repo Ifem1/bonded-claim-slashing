@@ -300,6 +300,8 @@ class BondedClaimSlashing(gl.Contract):
         if clean_id not in self.claims:
             raise gl.vm.UserError("unknown claim")
         record = self.claims[clean_id]
+        if record.withdrawn:
+            raise gl.vm.UserError("claim already withdrawn")
         if record.status == STATUS_SUPPORTED or record.status == STATUS_REFUTED:
             raise gl.vm.UserError("claim already terminal")
         if record.status == STATUS_UNKNOWN and record.attempts >= self.max_attempts:
@@ -326,6 +328,8 @@ class BondedClaimSlashing(gl.Contract):
         record = self.claims[clean_id]
         if record.status == STATUS_PENDING:
             raise gl.vm.UserError("claim pending")
+        if record.status == STATUS_UNKNOWN and record.attempts < self.max_attempts:
+            raise gl.vm.UserError("claim retryable")
         if record.withdrawn:
             raise gl.vm.UserError("already withdrawn")
 
@@ -377,6 +381,8 @@ class BondedClaimSlashing(gl.Contract):
             return u256(0)
         record = self.claims[clean_id]
         if record.withdrawn or record.status == STATUS_PENDING:
+            return u256(0)
+        if record.status == STATUS_UNKNOWN and record.attempts < self.max_attempts:
             return u256(0)
         account_addr = _coerce_address(account)
         if account_addr == self._recipient_for(record):
